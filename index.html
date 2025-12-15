@@ -236,8 +236,8 @@
                     </div>
                     
                     <!-- Tutorial Hint -->
-                    <div id="start-hint" class="absolute top-1/3 left-1/2 transform -translate-x-1/2 text-wood-800 font-bold text-xl bg-white/90 px-4 py-2 rounded-lg pointer-events-none z-30 animate-bounce shadow-lg border border-wood-200 whitespace-nowrap">
-                        拖曳右側手柄開始
+                    <div id="start-hint" class="absolute bottom-[10%] left-1/2 transform -translate-x-1/2 text-wood-800 font-bold text-xl bg-white/90 px-4 py-2 rounded-lg pointer-events-none z-30 animate-bounce shadow-lg border border-wood-200 whitespace-nowrap">
+                        拖曳右側手柄向上
                     </div>
                 </div>
             </div>
@@ -339,22 +339,21 @@
     <script>
         const CONFIG = {
             duration: 30,
-            pathWidth: 38, // Slightly narrower for higher difficulty with complex path
-            tolerance: 0.7, // Stricter tolerance
-            startGraceTime: 300, // ms to ignore collision at start
+            pathWidth: 38, // STRICTLY UNCHANGED
+            tolerance: 0.7, 
+            startGraceTime: 300, 
         };
 
         const STATE = {
-            status: 'START', // START, COUNTDOWN, PLAYING, FINISHED
+            status: 'START',
             timeLeft: CONFIG.duration,
             timerId: null,
-            progress: 0, // 0 to 100
+            progress: 0,
             isDragging: false,
             pathPoints: [], 
             totalLength: 0,
-            // Anchor dragging logic
-            dragStartPos: { x: 0, y: 0 }, // Pointer pos
-            ballStartPos: { x: 0, y: 0 }, // Ball pos
+            dragStartPos: { x: 0, y: 0 },
+            ballStartPos: { x: 0, y: 0 }, 
             dragStartTime: 0,
             currentBallPos: { x: 0, y: 0 }
         };
@@ -366,9 +365,9 @@
                 gameScreen: document.getElementById('screen-game'),
                 gameGrid: document.getElementById('game-grid'),
                 canvas: document.getElementById('game-canvas'),
-                playerGroup: document.getElementById('player-group'), // The container
-                playerBall: document.getElementById('player-ball'), // For visual ref
-                playerHandle: document.getElementById('player-handle'), // Drag target
+                playerGroup: document.getElementById('player-group'), 
+                playerBall: document.getElementById('player-ball'), 
+                playerHandle: document.getElementById('player-handle'),
                 startHint: document.getElementById('start-hint'),
                 timerDisplay: document.getElementById('timer-display'),
                 timerVal: document.getElementById('timer-val'),
@@ -377,7 +376,6 @@
                 countdownNum: document.getElementById('countdown-number'),
                 modalResult: document.getElementById('modal-result'),
                 modalRules: document.getElementById('modal-rules'),
-                // Result fields
                 resPercent: document.getElementById('res-percent'),
                 resMsg: document.getElementById('res-msg'),
                 resSubMsg: document.getElementById('res-submsg'),
@@ -387,7 +385,6 @@
             showGame() {
                 this.els.startScreen.classList.add('hidden-force');
                 this.els.gameScreen.classList.remove('hidden-force');
-                // Need to resize canvas when game screen is shown
                 setTimeout(() => game.resizeCanvas(), 50);
             },
 
@@ -417,18 +414,10 @@
                 }
             },
 
-            // Updates the entire group position based on the BALL'S center position
             updateBallPosition(cx, cy) {
-                // Ball size is 32px, so radius is 16px.
-                // We want center of ball to be at cx, cy.
-                // Group is absolute.
-                // Left = cx - 16
-                // Top = cy - 16
                 this.els.playerGroup.style.left = `${cx - 16}px`;
                 this.els.playerGroup.style.top = `${cy - 16}px`;
                 this.els.playerGroup.classList.remove('hidden-force');
-                
-                // Track internal state
                 STATE.currentBallPos = { x: cx, y: cy };
             },
 
@@ -440,7 +429,6 @@
                 this.els.overlayCountdown.classList.remove('hidden-force');
                 let count = 3;
                 this.els.countdownNum.textContent = count;
-                
                 const int = setInterval(() => {
                     count--;
                     if (count > 0) {
@@ -484,18 +472,12 @@
                 STATE.status = 'START';
                 ui.showStart();
                 this.ctx = ui.els.canvas.getContext('2d');
-                
-                // Add event listeners for resizing
                 window.addEventListener('resize', () => {
                    if (STATE.status !== 'START') this.resizeCanvas();
                 });
 
-                // Interaction Listeners
-                // 1. Bind START to the HANDLE only
                 const handle = ui.els.playerHandle;
                 handle.addEventListener('pointerdown', (e) => this.handleDragStart(e));
-
-                // 2. Bind MOVE/END to Window (to allow dragging outside handle)
                 window.addEventListener('pointermove', (e) => this.handleDragMove(e));
                 window.addEventListener('pointerup', (e) => this.handleDragEnd(e));
                 window.addEventListener('pointercancel', (e) => this.handleDragEnd(e));
@@ -509,10 +491,8 @@
                 ui.updateTimer(CONFIG.duration);
                 ui.toggleHint(false);
                 
-                // Prepare Canvas
                 this.resizeCanvas();
                 
-                // Force align ball to start point immediately
                 if(STATE.pathPoints.length > 0) {
                     const start = STATE.pathPoints[0];
                     ui.updateBallPosition(start.x, start.y);
@@ -530,7 +510,6 @@
                 this.generatePath();
                 this.draw();
                 
-                // Reset position if not dragging
                 if (STATE.pathPoints.length > 0 && !STATE.isDragging) {
                      const start = STATE.pathPoints[0];
                      ui.updateBallPosition(start.x, start.y);
@@ -540,12 +519,13 @@
             generatePath() {
                 const w = ui.els.canvas.width;
                 const h = ui.els.canvas.height;
-                
-                // More complex, tortuous path
-                // Start: Top Center-ish
-                // End: Bottom Center-ish
+                // Padding: Keep it safe
+                const p = 35; 
+                const safeW = w - 2 * p;
+
+                // Start: Bottom Center
                 const startX = w * 0.5;
-                const startY = h * 0.08; // Top padding
+                const startY = h - 60; 
                 
                 this.path2D = new Path2D();
                 this.path2D.moveTo(startX, startY);
@@ -555,57 +535,81 @@
                 let prevX = startX;
                 let prevY = startY;
 
-                // Create 8-9 segments of zig-zag
-                const segments = 8;
-                const totalH = h * 0.85; // Use 85% of height
-                const segmentH = totalH / segments;
-                
-                // Helper for randomish but playable width
-                // Max width deviation from center
-                const maxDev = w * 0.4; 
-
-                for(let i=1; i <= segments; i++) {
-                    // Target Y is strictly increasing
-                    const targetY = startY + (i * segmentH);
+                // 14 Complex Segments (Bottom to Top)
+                // Includes: 2 U-turns, 2 S-Curve sections (3+ bends), 1 Hook, 1 Edge Arc
+                // x is relative to safeW (0.0 - 1.0)
+                // y is percentage of total height (1.0 = bottom, 0.0 = top)
+                const targets = [
+                    // 1. Initial Right-Up to prepare for first U-Turn
+                    { x: 0.85, y: 0.88, c1x: 0.60, c1y: 0.92, c2x: 0.80, c2y: 0.92 },
                     
-                    // Target X oscillates
-                    // If i is odd, go Left/Right, etc.
-                    // But we want unpredictability.
-                    // Simple pattern: Center -> Left -> Right -> Far Left -> Center -> ...
-                    let dir = (i % 2 === 0) ? 1 : -1;
-                    if (i % 3 === 0) dir *= -1; // Randomize rhythm
+                    // 2. U-Turn 1: Sweep ALL the way left
+                    { x: 0.10, y: 0.82, c1x: 0.90, c1y: 0.82, c2x: 0.40, c2y: 0.88 },
+                    
+                    // 3. S-Curve Section 1 (Start): Zig
+                    { x: 0.30, y: 0.78, c1x: 0.10, c1y: 0.80, c2x: 0.20, c2y: 0.76 },
+                    
+                    // 4. S-Curve Section 1 (Mid): Zag
+                    { x: 0.15, y: 0.72, c1x: 0.35, c1y: 0.78, c2x: 0.25, c2y: 0.70 },
+                    
+                    // 5. S-Curve Section 1 (End): Zig out
+                    { x: 0.45, y: 0.68, c1x: 0.10, c1y: 0.72, c2x: 0.30, c2y: 0.64 },
+                    
+                    // 6. Long Arc to Right Edge (Edge Hug setup)
+                    { x: 0.92, y: 0.55, c1x: 0.70, c1y: 0.75, c2x: 0.95, c2y: 0.65 },
+                    
+                    // 7. Edge Hug Up (Stay on right edge)
+                    { x: 0.88, y: 0.42, c1x: 0.90, c1y: 0.50, c2x: 0.95, c2y: 0.45 },
+                    
+                    // 8. The Hook / U-Turn 2 (Drop Down and Hook Left)
+                    // Moves from y=0.42 down to y=0.50 then ready to go up
+                    { x: 0.55, y: 0.50, c1x: 0.80, c1y: 0.40, c2x: 0.70, c2y: 0.55 },
+                    
+                    // 9. Recover Up Left
+                    { x: 0.15, y: 0.38, c1x: 0.40, c1y: 0.45, c2x: 0.30, c2y: 0.40 },
+                    
+                    // 10. S-Curve Section 2 (Start): Mini Zig
+                    { x: 0.35, y: 0.32, c1x: 0.15, c1y: 0.35, c2x: 0.25, c2y: 0.30 },
+                    
+                    // 11. S-Curve Section 2 (Mid): Mini Zag
+                    { x: 0.18, y: 0.26, c1x: 0.40, c1y: 0.32, c2x: 0.30, c2y: 0.24 },
+                    
+                    // 12. S-Curve Section 2 (End): Mini Zig
+                    { x: 0.45, y: 0.20, c1x: 0.15, c1y: 0.26, c2x: 0.30, c2y: 0.18 },
+                    
+                    // 13. High Loop/Arc to Top Right
+                    { x: 0.80, y: 0.12, c1x: 0.60, c1y: 0.22, c2x: 0.90, c2y: 0.18 },
+                    
+                    // 14. Finish Center
+                    { x: 0.50, y: 0.08, c1x: 0.70, c1y: 0.08, c2x: 0.60, c2y: 0.08 }
+                ];
 
-                    // Vary the amplitude
-                    const amp = (0.2 + Math.random() * 0.6) * maxDev;
-                    const targetX = (w * 0.5) + (dir * amp);
+                targets.forEach(t => {
+                    const tx = p + t.x * safeW;
+                    const ty = t.y * h;
+                    
+                    const cp1x = p + t.c1x * safeW;
+                    const cp1y = t.c1y * h;
+                    const cp2x = p + t.c2x * safeW;
+                    const cp2y = t.c2y * h;
 
-                    // Control points for Bezier
-                    // CP1 pulls down from prev
-                    // CP2 pulls up from target
-                    const cp1x = prevX; 
-                    const cp1y = prevY + (segmentH * 0.5);
-                    const cp2x = targetX;
-                    const cp2y = targetY - (segmentH * 0.5);
+                    this.path2D.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
 
-                    // Draw
-                    this.path2D.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, targetX, targetY);
-
-                    // Approximation loop for points (same as before)
+                    // Generate Progress Points for collision detection
                     const steps = 40;
                     for(let s=1; s<=steps; s++) {
-                        const t = s/steps;
-                        const px = Math.pow(1-t,3)*prevX + 3*Math.pow(1-t,2)*t*cp1x + 3*(1-t)*t*t*cp2x + t*t*t*targetX;
-                        const py = Math.pow(1-t,3)*prevY + 3*Math.pow(1-t,2)*t*cp1y + 3*(1-t)*t*t*cp2y + t*t*t*targetY;
+                        const stepT = s/steps;
+                        const px = Math.pow(1-stepT,3)*prevX + 3*Math.pow(1-stepT,2)*stepT*cp1x + 3*(1-stepT)*stepT*stepT*cp2x + stepT*stepT*stepT*tx;
+                        const py = Math.pow(1-stepT,3)*prevY + 3*Math.pow(1-stepT,2)*stepT*cp1y + 3*(1-stepT)*stepT*stepT*cp2y + stepT*stepT*stepT*ty;
                         
                         const last = STATE.pathPoints[STATE.pathPoints.length-1];
                         const dist = Math.hypot(px-last.x, py-last.y);
                         currentLen += dist;
                         STATE.pathPoints.push({x: px, y: py, len: currentLen});
                     }
-
-                    prevX = targetX;
-                    prevY = targetY;
-                }
+                    prevX = tx;
+                    prevY = ty;
+                });
 
                 STATE.totalLength = currentLen;
             },
@@ -638,22 +642,20 @@
                 const start = STATE.pathPoints[0];
                 const end = STATE.pathPoints[STATE.pathPoints.length-1];
                 
-                // Start Text (Top)
+                // Start Text (Bottom)
                 this.ctx.font = 'bold 18px "Noto Sans TC"';
                 this.ctx.fillStyle = '#b45309';
                 this.ctx.textAlign = 'center';
-                this.ctx.fillText('起點', start.x, start.y - 30);
+                this.ctx.fillText('起點', start.x, start.y + 45); 
                 
-                // Start Circle indicator
                 this.ctx.beginPath();
                 this.ctx.arc(start.x, start.y, 8, 0, Math.PI*2);
-                this.ctx.fillStyle = '#166534'; // Green dot for start
+                this.ctx.fillStyle = '#166534'; // Green dot
                 this.ctx.fill();
 
-                // End Text (Bottom)
+                // End Text (Top)
                 this.ctx.fillStyle = '#b45309';
-                this.ctx.fillText('終點', end.x, end.y + 40);
-                // End Circle
+                this.ctx.fillText('終點', end.x, end.y - 25);
                 this.ctx.beginPath();
                 this.ctx.arc(end.x, end.y, 10, 0, Math.PI * 2);
                 this.ctx.fillStyle = '#b45309';
@@ -666,12 +668,9 @@
                 STATE.progress = 0;
                 STATE.isDragging = false;
                 
-                // Lock scroll
                 document.body.classList.add('no-scroll');
-
                 ui.toggleHint(true);
                 
-                // Start Timer
                 if (STATE.timerId) clearInterval(STATE.timerId);
                 STATE.timerId = setInterval(() => {
                     STATE.timeLeft--;
@@ -685,65 +684,40 @@
 
             handleDragStart(e) {
                 if (STATE.status !== 'PLAYING') return;
-                
                 STATE.isDragging = true;
                 ui.toggleHint(false);
-                
-                // Anchor Logic:
-                // Record where the pointer is relative to screen
                 STATE.dragStartPos = { x: e.clientX, y: e.clientY };
-                // Record where the ball currently is
                 STATE.ballStartPos = { ...STATE.currentBallPos };
-                
                 STATE.dragStartTime = Date.now();
-                
-                // Visual feedback
                 ui.els.playerGroup.style.cursor = 'grabbing';
                 ui.els.playerHandle.style.cursor = 'grabbing';
             },
 
             handleDragMove(e) {
                 if (STATE.status !== 'PLAYING' || !STATE.isDragging) return;
-                e.preventDefault(); // Stop default touch actions
+                e.preventDefault(); 
 
-                // Calculate delta
                 const deltaX = e.clientX - STATE.dragStartPos.x;
                 const deltaY = e.clientY - STATE.dragStartPos.y;
-
-                // New Position
                 const newX = STATE.ballStartPos.x + deltaX;
                 const newY = STATE.ballStartPos.y + deltaY;
                 
-                // Check Bounds relative to Game Grid
                 const gridRect = ui.els.gameGrid.getBoundingClientRect();
                 
-                // Convert screen coordinates of newX/newY (which are relative to grid in logic, wait...)
-                // Wait, ballStartPos was stored based on updateBallPosition inputs?
-                // No, currentBallPos tracks logic coordinates (0,0 is top-left of canvas).
-                // But e.clientX is screen. 
-                // That's fine. delta is screen pixels, which map 1:1 to CSS pixels usually.
-                // So newX is local canvas coordinate.
-                
-                // Boundary check (keep inside canvas)
                 if (newX < 0 || newX > gridRect.width || newY < 0 || newY > gridRect.height) {
                     this.failGame();
                     return;
                 }
 
-                // Update Visuals
                 ui.updateBallPosition(newX, newY);
 
-                // Collision Detection & Progress
-                // 1. Grace Period
                 const timeElapsed = Date.now() - STATE.dragStartTime;
                 if (timeElapsed < CONFIG.startGraceTime) {
-                    // During grace period, update progress but don't fail
                     this.checkProgress(newX, newY);
                     return; 
                 }
 
-                // 2. Collision Check
-                // Set context line width to max boundary width
+                // Collision Logic
                 this.ctx.lineWidth = CONFIG.pathWidth;
                 const safe = this.ctx.isPointInStroke(this.path2D, newX, newY);
                 
@@ -755,12 +729,9 @@
             },
 
             checkProgress(x, y) {
-                // Find closest point on path to estimate progress
                 let minDist = Infinity;
                 let closestIdx = 0;
                 
-                // Search optimization: Look around current progress?
-                // For robustness, scan all points (array is small, < 400)
                 for(let i=0; i<STATE.pathPoints.length; i++) {
                     const p = STATE.pathPoints[i];
                     const d = (x - p.x)**2 + (y - p.y)**2;
@@ -773,12 +744,10 @@
                 const currentLen = STATE.pathPoints[closestIdx].len;
                 const percent = (currentLen / STATE.totalLength) * 100;
                 
-                // Only update forward progress
                 if (percent > STATE.progress) {
                     STATE.progress = percent;
                 }
                 
-                // Check Win
                 if (percent >= 98) {
                     STATE.progress = 100;
                     this.finishGame();
@@ -796,12 +765,9 @@
             failGame() {
                 STATE.status = 'FINISHED';
                 clearInterval(STATE.timerId);
-                // Unlock scroll
                 document.body.classList.remove('no-scroll');
-
                 ui.els.playerBall.classList.add('bg-red-600');
                 ui.els.playerBall.classList.remove('bg-nature-main');
-                
                 setTimeout(() => {
                     ui.els.playerBall.classList.remove('bg-red-600');
                     ui.els.playerBall.classList.add('bg-nature-main');
@@ -813,9 +779,7 @@
             finishGame() {
                 STATE.status = 'FINISHED';
                 clearInterval(STATE.timerId);
-                // Unlock scroll
                 document.body.classList.remove('no-scroll');
-                
                 ui.enableResultBtn(true);
                 ui.showResult();
             },
@@ -838,7 +802,6 @@
             }
         };
 
-        // Initialize
         game.init();
 
     </script>
