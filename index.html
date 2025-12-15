@@ -168,7 +168,7 @@
                         土行對應臟腑為脾與胃，與消化、肌肉穩定有關。
                     </p>
                     <h2 class="text-xl font-bold text-wood-800 mb-3 border-b border-wood-300 pb-2 flex items-center gap-2 tracking-wider">
-                        <span>📜</span> 遊戲規則
+                        <span>📜 遊戲規則</span>
                     </h2>
                     <!-- Rules Updated -->
                     <ul class="space-y-3 text-wood-800 leading-relaxed text-base font-medium tracking-wide">
@@ -178,7 +178,7 @@
                         </li>
                         <li class="flex items-start gap-2">
                             <span class="font-bold text-nature-dark">②</span>
-                            <span>圓點出界或碰觸邊線，遊戲立即結束</span>
+                            <span>圓點邊緣一碰觸邊線，遊戲立即結束（難度提升）</span>
                         </li>
                         <li class="flex items-start gap-2">
                             <span class="font-bold text-nature-dark">③</span>
@@ -327,7 +327,7 @@
                 <!-- Rules Content Updated -->
                 <ul class="space-y-4 text-wood-800 font-medium tracking-wide">
                     <li class="flex gap-2 text-base"><span class="font-bold text-nature-main">①</span><span>限時30秒，沿著發光路徑穩穩拖曳小圓點前進</span></li>
-                    <li class="flex gap-2 text-base"><span class="font-bold text-nature-main">②</span><span>圓點出界或碰觸邊線，遊戲立即結束</span></li>
+                    <li class="flex gap-2 text-base"><span class="font-bold text-nature-main">②</span><span>圓點邊緣一碰觸邊線，遊戲立即結束（難度提升）</span></li>
                     <li class="flex gap-2 text-base"><span class="font-bold text-nature-main">③</span><span>依前進距離計分，完成比例越高代表肌肉力量穩定</span></li>
                 </ul>
             </div>
@@ -340,6 +340,7 @@
         const CONFIG = {
             duration: 30,
             pathWidth: 38, // STRICTLY UNCHANGED
+            ballRadius: 10, // Adjusted for strict collision logic (Visual size remains 32px)
             tolerance: 0.7, 
             startGraceTime: 300, 
         };
@@ -355,7 +356,8 @@
             dragStartPos: { x: 0, y: 0 },
             ballStartPos: { x: 0, y: 0 }, 
             dragStartTime: 0,
-            currentBallPos: { x: 0, y: 0 }
+            currentBallPos: { x: 0, y: 0 },
+            currentSeed: 0
         };
 
         // UI Controller
@@ -463,6 +465,26 @@
             }
         };
 
+        // Simple Random Seed LCG
+        function Random(seed) {
+            this.seed = seed % 2147483647;
+            if (this.seed <= 0) this.seed += 2147483646;
+        }
+        Random.prototype.next = function() {
+            this.seed = (this.seed * 16807) % 2147483647;
+            return this.seed / 2147483647;
+        };
+        Random.prototype.range = function(min, max) {
+            return min + this.next() * (max - min);
+        };
+        Random.prototype.shuffle = function(arr) {
+             for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(this.next() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
         // Game Logic
         const game = {
             ctx: null,
@@ -484,6 +506,8 @@
             },
 
             startCountdown() {
+                // Ensure fresh seed every time
+                STATE.currentSeed = Date.now() + Math.random() * 10000;
                 ui.showGame();
                 ui.closeResult();
                 STATE.status = 'COUNTDOWN';
@@ -491,7 +515,7 @@
                 ui.updateTimer(CONFIG.duration);
                 ui.toggleHint(false);
                 
-                this.resizeCanvas();
+                this.resizeCanvas(); 
                 
                 if(STATE.pathPoints.length > 0) {
                     const start = STATE.pathPoints[0];
@@ -507,7 +531,7 @@
                 const container = ui.els.gameGrid;
                 ui.els.canvas.width = container.offsetWidth;
                 ui.els.canvas.height = container.offsetHeight;
-                this.generatePath();
+                this.generatePath(STATE.currentSeed);
                 this.draw();
                 
                 if (STATE.pathPoints.length > 0 && !STATE.isDragging) {
@@ -516,102 +540,304 @@
                 }
             },
 
-            generatePath() {
+            generatePath(seed) {
                 const w = ui.els.canvas.width;
                 const h = ui.els.canvas.height;
-                // Padding: Keep it safe
-                const p = 35; 
-                const safeW = w - 2 * p;
+                const rand = new Random(seed);
 
-                // Start: Bottom Center
-                const startX = w * 0.5;
-                const startY = h - 60; 
+                // 1. Safe Margins (Strict Visibility)
+                // Ensure start and end are well within 110px margins
+                const topMargin = 110; 
+                const bottomMargin = 110;
+                const p = 45; // Padding
                 
-                this.path2D = new Path2D();
-                this.path2D.moveTo(startX, startY);
+                const startY = h - bottomMargin;
+                const endY = topMargin;
+                const startX = w * 0.5;
 
-                STATE.pathPoints = [{x: startX, y: startY, len: 0}];
-                let currentLen = 0;
-                let prevX = startX;
-                let prevY = startY;
-
-                // 14 Complex Segments (Bottom to Top)
-                // Includes: 2 U-turns, 2 S-Curve sections (3+ bends), 1 Hook, 1 Edge Arc
-                // x is relative to safeW (0.0 - 1.0)
-                // y is percentage of total height (1.0 = bottom, 0.0 = top)
-                const targets = [
-                    // 1. Initial Right-Up to prepare for first U-Turn
-                    { x: 0.85, y: 0.88, c1x: 0.60, c1y: 0.92, c2x: 0.80, c2y: 0.92 },
+                let success = false;
+                let attempts = 0;
+                const maxAttempts = 50;
+                
+                // Helper to check intersection
+                const checkIntersection = (pts, x, y, excludeCount) => {
+                    // Check against existing points
+                    // We only check points older than 'excludeCount' to avoid self-detection
+                    const threshold = CONFIG.pathWidth + 15; // 38 + 15 = 53px clearance
+                    const limit = pts.length - excludeCount;
+                    if (limit <= 0) return false;
                     
-                    // 2. U-Turn 1: Sweep ALL the way left
-                    { x: 0.10, y: 0.82, c1x: 0.90, c1y: 0.82, c2x: 0.40, c2y: 0.88 },
-                    
-                    // 3. S-Curve Section 1 (Start): Zig
-                    { x: 0.30, y: 0.78, c1x: 0.10, c1y: 0.80, c2x: 0.20, c2y: 0.76 },
-                    
-                    // 4. S-Curve Section 1 (Mid): Zag
-                    { x: 0.15, y: 0.72, c1x: 0.35, c1y: 0.78, c2x: 0.25, c2y: 0.70 },
-                    
-                    // 5. S-Curve Section 1 (End): Zig out
-                    { x: 0.45, y: 0.68, c1x: 0.10, c1y: 0.72, c2x: 0.30, c2y: 0.64 },
-                    
-                    // 6. Long Arc to Right Edge (Edge Hug setup)
-                    { x: 0.92, y: 0.55, c1x: 0.70, c1y: 0.75, c2x: 0.95, c2y: 0.65 },
-                    
-                    // 7. Edge Hug Up (Stay on right edge)
-                    { x: 0.88, y: 0.42, c1x: 0.90, c1y: 0.50, c2x: 0.95, c2y: 0.45 },
-                    
-                    // 8. The Hook / U-Turn 2 (Drop Down and Hook Left)
-                    // Moves from y=0.42 down to y=0.50 then ready to go up
-                    { x: 0.55, y: 0.50, c1x: 0.80, c1y: 0.40, c2x: 0.70, c2y: 0.55 },
-                    
-                    // 9. Recover Up Left
-                    { x: 0.15, y: 0.38, c1x: 0.40, c1y: 0.45, c2x: 0.30, c2y: 0.40 },
-                    
-                    // 10. S-Curve Section 2 (Start): Mini Zig
-                    { x: 0.35, y: 0.32, c1x: 0.15, c1y: 0.35, c2x: 0.25, c2y: 0.30 },
-                    
-                    // 11. S-Curve Section 2 (Mid): Mini Zag
-                    { x: 0.18, y: 0.26, c1x: 0.40, c1y: 0.32, c2x: 0.30, c2y: 0.24 },
-                    
-                    // 12. S-Curve Section 2 (End): Mini Zig
-                    { x: 0.45, y: 0.20, c1x: 0.15, c1y: 0.26, c2x: 0.30, c2y: 0.18 },
-                    
-                    // 13. High Loop/Arc to Top Right
-                    { x: 0.80, y: 0.12, c1x: 0.60, c1y: 0.22, c2x: 0.90, c2y: 0.18 },
-                    
-                    // 14. Finish Center
-                    { x: 0.50, y: 0.08, c1x: 0.70, c1y: 0.08, c2x: 0.60, c2y: 0.08 }
-                ];
-
-                targets.forEach(t => {
-                    const tx = p + t.x * safeW;
-                    const ty = t.y * h;
-                    
-                    const cp1x = p + t.c1x * safeW;
-                    const cp1y = t.c1y * h;
-                    const cp2x = p + t.c2x * safeW;
-                    const cp2y = t.c2y * h;
-
-                    this.path2D.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
-
-                    // Generate Progress Points for collision detection
-                    const steps = 40;
-                    for(let s=1; s<=steps; s++) {
-                        const stepT = s/steps;
-                        const px = Math.pow(1-stepT,3)*prevX + 3*Math.pow(1-stepT,2)*stepT*cp1x + 3*(1-stepT)*stepT*stepT*cp2x + stepT*stepT*stepT*tx;
-                        const py = Math.pow(1-stepT,3)*prevY + 3*Math.pow(1-stepT,2)*stepT*cp1y + 3*(1-stepT)*stepT*stepT*cp2y + stepT*stepT*stepT*ty;
-                        
-                        const last = STATE.pathPoints[STATE.pathPoints.length-1];
-                        const dist = Math.hypot(px-last.x, py-last.y);
-                        currentLen += dist;
-                        STATE.pathPoints.push({x: px, y: py, len: currentLen});
+                    // Optimization: check every 3rd point
+                    for (let i = 0; i < limit; i += 3) {
+                        const p = pts[i];
+                        if (Math.abs(p.x - x) > threshold || Math.abs(p.y - y) > threshold) {
+                             // box check passed, too far
+                             continue;
+                        }
+                        // Close enough to check distance
+                         const dist = Math.hypot(x - p.x, y - p.y);
+                         if (dist < threshold) return true;
                     }
-                    prevX = tx;
-                    prevY = ty;
-                });
+                    return false;
+                };
 
-                STATE.totalLength = currentLen;
+                while (!success && attempts < maxAttempts) {
+                    attempts++;
+                    
+                    this.path2D = new Path2D();
+                    const pts = [];
+                    
+                    this.path2D.moveTo(startX, startY);
+                    pts.push({x: startX, y: startY, len: 0});
+                    
+                    let cx = startX;
+                    let cy = startY;
+                    let cLen = 0;
+                    
+                    // Feature Deck
+                    const deck = ['u','u', 's','s', 'h', 'e', 'e', 'z', 'z', 'z', 'z'];
+                    rand.shuffle(deck);
+                    
+                    let failed = false;
+                    let minX = cx;
+                    let maxX = cx;
+                    let bigMoves = 0; // Count |dx| > 0.18w
+                    
+                    // Generate segments
+                    for (let i = 0; i < deck.length; i++) {
+                        if (cy < endY + 80) break; // Near top
+
+                        const type = deck[i];
+                        // Variable height step
+                        const stepY = ((startY - endY) / 12) * rand.range(0.8, 1.3);
+                        const segments = [];
+                        let segStart = {x:cx, y:cy};
+                        
+                        // temp vars for generation
+                        let tx = cx;
+                        let ty = cy;
+                        
+                        // --- Feature Logic ---
+                        if (type === 'u') { // U-Turn
+                            const dir = rand.next() > 0.5 ? 1 : -1;
+                            const rw = rand.range(0.25, 0.4) * w;
+                            const drop = rand.range(30, 60);
+                            
+                            // 1. Out & Down
+                            let nx = tx + dir * rw;
+                            let ny = ty + drop;
+                            segments.push({cp1x: tx + dir*rw*0.5, cp1y: ty, cp2x: nx, cp2y: ty+10, x: nx, y: ny});
+                            
+                            // 2. Hook Back
+                            let nx2 = nx - dir * (rw * 0.8);
+                            let ny2 = ny - 10;
+                            segments.push({cp1x: nx, cp1y: ny+40, cp2x: nx2, cp2y: ny+40, x: nx2, y: ny2});
+                            
+                            // 3. Return Up
+                            let nx3 = nx2 - dir * 20;
+                            let ny3 = ty - stepY; 
+                            segments.push({cp1x: nx2, cp1y: ny2-30, cp2x: nx3, cp2y: ny3+20, x: nx3, y: ny3});
+                            
+                            tx = nx3; ty = ny3;
+                        } 
+                        else if (type === 's') { // S-Curve
+                            const subH = stepY / 3;
+                            for(let k=0; k<3; k++) {
+                                const dir = (k%2===0)? 1 : -1;
+                                const sw = rand.range(40, 80);
+                                let nx = tx + dir * sw;
+                                // wall bounce
+                                if (nx < p) nx = p + 20; 
+                                if (nx > w - p) nx = w - p - 20;
+                                
+                                segments.push({cp1x: tx, cp1y: ty-subH*0.5, cp2x: nx, cp2y: ty-subH*0.5, x: nx, y: ty-subH});
+                                tx = nx; ty -= subH;
+                            }
+                        }
+                        else if (type === 'h') { // Hook
+                            const dir = rand.next() > 0.5 ? 1 : -1;
+                            const hh = stepY * 1.2;
+                            // Up
+                            segments.push({cp1x: tx, cp1y: ty-hh*0.5, cp2x: tx, cp2y: ty-hh, x: tx, y: ty-hh});
+                            ty -= hh;
+                            // Hook In/Down
+                            let nx = tx + dir * 50;
+                            let ny = ty + 40;
+                            segments.push({cp1x: tx, cp1y: ty-30, cp2x: nx, cp2y: ty+10, x: nx, y: ny});
+                            // Recover
+                            let nx2 = nx + dir * 30;
+                            let ny2 = ty - 40; // up relative to hook bottom
+                            segments.push({cp1x: nx, cp1y: ny+20, cp2x: nx2, cp2y: ny2+20, x: nx2, y: ny2});
+                            tx = nx2; ty = ny2;
+                        }
+                        else if (type === 'e') { // Edge Hug
+                            const isLeft = tx < w/2;
+                            const edgeX = isLeft ? p + 20 : w - p - 20;
+                            // Go to edge
+                            segments.push({cp1x: tx, cp1y: ty-20, cp2x: edgeX, cp2y: ty-20, x: edgeX, y: ty-40});
+                            ty -= 40;
+                            // Hug
+                            const len = stepY;
+                            segments.push({cp1x: edgeX, cp1y: ty-len*0.4, cp2x: edgeX, cp2y: ty-len*0.6, x: edgeX, y: ty-len});
+                            tx = edgeX; ty -= len;
+                        }
+                        else { // Zig/Zag (Basic)
+                            const dir = rand.next() > 0.5 ? 1 : -1;
+                            const dx = rand.range(0.2, 0.4) * w * dir;
+                            let nx = tx + dx;
+                            if (nx < p) nx = p + 30;
+                            if (nx > w - p) nx = w - p - 30;
+                            
+                            segments.push({cp1x: tx + dx*0.2, cp1y: ty - stepY*0.2, cp2x: nx - dx*0.2, cp2y: ty - stepY*0.8, x: nx, y: ty - stepY});
+                            tx = nx; ty -= stepY;
+                        }
+
+                        // --- Validation & Committal ---
+                        // Check segment bounds and intersections
+                        for (let s of segments) {
+                            if (s.x < p || s.x > w-p || s.y > h+50 || s.y < endY - 80) {
+                                failed = true; break; // Out of bounds
+                            }
+                            
+                            // Sample points on curve
+                            const steps = 10;
+                            let segFailed = false;
+                            const prev = pts[pts.length-1];
+                            
+                            for (let k=1; k<=steps; k++) {
+                                const t = k/steps;
+                                const bx = Math.pow(1-t,3)*prev.x + 3*Math.pow(1-t,2)*t*s.cp1x + 3*(1-t)*t*t*s.cp2x + t*t*t*s.x;
+                                const by = Math.pow(1-t,3)*prev.y + 3*Math.pow(1-t,2)*t*s.cp1y + 3*(1-t)*t*t*s.cp2y + t*t*t*s.y;
+                                
+                                if (checkIntersection(pts, bx, by, 30)) {
+                                    segFailed = true; break;
+                                }
+                                
+                                minX = Math.min(minX, bx);
+                                maxX = Math.max(maxX, bx);
+                            }
+                            
+                            if (segFailed) { failed = true; break; }
+                            
+                            // If valid, commit to path2D and pts
+                            this.path2D.bezierCurveTo(s.cp1x, s.cp1y, s.cp2x, s.cp2y, s.x, s.y);
+                            
+                            // Add points for future checks
+                            for (let k=1; k<=steps; k++) {
+                                const t = k/steps;
+                                const bx = Math.pow(1-t,3)*prev.x + 3*Math.pow(1-t,2)*t*s.cp1x + 3*(1-t)*t*t*s.cp2x + t*t*t*s.x;
+                                const by = Math.pow(1-t,3)*prev.y + 3*Math.pow(1-t,2)*t*s.cp1y + 3*(1-t)*t*t*s.cp2y + t*t*t*s.y;
+                                cLen += Math.hypot(bx - pts[pts.length-1].x, by - pts[pts.length-1].y);
+                                pts.push({x: bx, y: by, len: cLen});
+                            }
+                            
+                            // Complexity Check
+                            if (Math.abs(s.x - segStart.x) > w * 0.18) bigMoves++;
+                            
+                            cx = s.x; cy = s.y;
+                        }
+                        
+                        if (failed) break;
+                    }
+                    
+                    // Final Connect
+                    if (!failed) {
+                        const fy = endY;
+                        const fx = w * 0.5;
+                        const midY = (cy + fy) / 2;
+                        
+                        // Check final segment intersection
+                        // Simple bezier
+                        const steps = 10;
+                        let finalFailed = false;
+                        for(let k=1; k<=steps; k++){
+                            const t = k/steps;
+                             const bx = Math.pow(1-t,3)*cx + 3*Math.pow(1-t,2)*t*cx + 3*(1-t)*t*t*fx + t*t*t*fx;
+                             const by = Math.pow(1-t,3)*cy + 3*Math.pow(1-t,2)*t*midY + 3*(1-t)*t*t*midY + t*t*t*fy;
+                             if(checkIntersection(pts, bx, by, 30)) { finalFailed = true; break; }
+                             minX = Math.min(minX, bx);
+                             maxX = Math.max(maxX, bx);
+                        }
+                        
+                        if (!finalFailed) {
+                            // Check Coverage and Complexity
+                            if (minX > w * 0.20 || maxX < w * 0.80 || bigMoves < 6) {
+                                // Not complex enough, retry
+                                failed = true;
+                            } else {
+                                // Success
+                                this.path2D.bezierCurveTo(cx, midY, fx, midY, fx, fy);
+                                // fill points
+                                 for(let k=1; k<=20; k++){
+                                    const t = k/20;
+                                     const bx = Math.pow(1-t,3)*cx + 3*Math.pow(1-t,2)*t*cx + 3*(1-t)*t*t*fx + t*t*t*fx;
+                                     const by = Math.pow(1-t,3)*cy + 3*Math.pow(1-t,2)*t*midY + 3*(1-t)*t*t*midY + t*t*t*fy;
+                                     cLen += Math.hypot(bx - pts[pts.length-1].x, by - pts[pts.length-1].y);
+                                     pts.push({x: bx, y: by, len: cLen});
+                                }
+                                
+                                STATE.pathPoints = pts;
+                                STATE.totalLength = cLen;
+                                success = true;
+                            }
+                        }
+                    }
+                }
+                
+                // --- Fallback Safe Complex Path ---
+                if (!success) {
+                    console.warn("Generating Fallback Safety Complex Path");
+                    this.path2D = new Path2D();
+                    STATE.pathPoints = [];
+                    const sx = w*0.5;
+                    const sy = h - bottomMargin;
+                    const ey = topMargin;
+                    
+                    this.path2D.moveTo(sx, sy);
+                    STATE.pathPoints.push({x: sx, y: sy, len: 0});
+                    
+                    let cLen = 0;
+                    
+                    // Fixed ZigZag Pattern that guarantees complexity and bounds
+                    // 6 major turns
+                    const levels = 6;
+                    const hStep = (sy - ey) / levels;
+                    let currX = sx;
+                    let currY = sy;
+                    
+                    for (let i = 0; i < levels; i++) {
+                        const targetY = sy - (i+1) * hStep;
+                        // Alternate Left (20%) and Right (80%)
+                        // If i is last, go to Center
+                        let targetX;
+                        if (i === levels - 1) targetX = w * 0.5;
+                        else targetX = (i % 2 === 0) ? w * 0.2 : w * 0.8; 
+                        
+                        const cp1x = currX;
+                        const cp1y = currY - hStep * 0.5;
+                        const cp2x = targetX;
+                        const cp2y = currY - hStep * 0.5;
+                        
+                        this.path2D.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, targetX, targetY);
+                        
+                        // Fill points
+                        const lastP = STATE.pathPoints[STATE.pathPoints.length-1];
+                        for(let k=1; k<=20; k++){
+                             const t = k/20;
+                             const bx = Math.pow(1-t,3)*currX + 3*Math.pow(1-t,2)*t*cp1x + 3*(1-t)*t*t*cp2x + t*t*t*targetX;
+                             const by = Math.pow(1-t,3)*currY + 3*Math.pow(1-t,2)*t*cp1y + 3*(1-t)*t*t*cp2y + t*t*t*targetY;
+                             // Approx distance from previous point in batch
+                             const prev = STATE.pathPoints[STATE.pathPoints.length-1];
+                             const d = Math.hypot(bx - prev.x, by - prev.y);
+                             cLen += d;
+                             STATE.pathPoints.push({x: bx, y: by, len: cLen});
+                        }
+                        
+                        currX = targetX;
+                        currY = targetY;
+                    }
+                    STATE.totalLength = cLen;
+                }
             },
 
             draw() {
@@ -717,21 +943,20 @@
                     return; 
                 }
 
-                // Collision Logic
-                this.ctx.lineWidth = CONFIG.pathWidth;
-                const safe = this.ctx.isPointInStroke(this.path2D, newX, newY);
+                const collisionInfo = this.checkCollision(newX, newY);
                 
-                if (!safe) {
+                if (collisionInfo.collided) {
                     this.failGame();
                 } else {
-                    this.checkProgress(newX, newY);
+                    this.updateProgressFromInfo(collisionInfo);
                 }
             },
 
-            checkProgress(x, y) {
+            checkCollision(x, y) {
                 let minDist = Infinity;
                 let closestIdx = 0;
                 
+                // Optimized search can be done, but linear is fine for < 1000 points
                 for(let i=0; i<STATE.pathPoints.length; i++) {
                     const p = STATE.pathPoints[i];
                     const d = (x - p.x)**2 + (y - p.y)**2;
@@ -740,8 +965,26 @@
                         closestIdx = i;
                     }
                 }
+                
+                const dist = Math.sqrt(minDist);
+                
+                // Strict Collision Logic
+                // Safe Zone Half Width = (Path Width * Tolerance) / 2
+                const safeHalfWidth = (CONFIG.pathWidth * CONFIG.tolerance) / 2;
+                
+                // Collision if (Distance from center + Ball Radius) > Safe Zone Radius
+                const collided = (dist + CONFIG.ballRadius) > safeHalfWidth;
+                
+                return { collided, closestIdx, dist };
+            },
 
-                const currentLen = STATE.pathPoints[closestIdx].len;
+            checkProgress(x, y) {
+                const info = this.checkCollision(x, y);
+                this.updateProgressFromInfo(info);
+            },
+            
+            updateProgressFromInfo(info) {
+                const currentLen = STATE.pathPoints[info.closestIdx].len;
                 const percent = (currentLen / STATE.totalLength) * 100;
                 
                 if (percent > STATE.progress) {
