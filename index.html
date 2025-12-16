@@ -95,7 +95,7 @@
         z-index: 20;
         display: flex;
         align-items: center;
-        /* Center the ball (32px) by offsetting -16px left/top */
+        /* Center the ball (26px) by offsetting -13px left/top */
         /* But we update position dynamically via JS */
         transform-origin: center left; 
         cursor: grab;
@@ -104,15 +104,15 @@
         cursor: grabbing;
       }
       #player-ball {
-        width: 32px;
-        height: 32px;
+        width: 26px; /* Adjusted radius 13 * 2 */
+        height: 26px;
         background-color: #b45309; /* nature-main */
-        border: 4px solid white;
         border-radius: 50%;
         box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         pointer-events: none; /* Make ball transparent to clicks so we grab the handle */
         position: relative;
         z-index: 2;
+        /* Removed white border as requested */
       }
       #player-handle {
         width: 60px;
@@ -340,9 +340,10 @@
         const CONFIG = {
             duration: 30,
             pathWidth: 38, // STRICTLY UNCHANGED
-            ballRadius: 10, // Adjusted for strict collision logic (Visual size remains 32px)
-            tolerance: 0.7, 
+            ballRadius: 13, // Adjusted to 13 as requested (Visual size 26px)
+            tolerance: 0.93, // Revised to 0.93 for better visual alignment
             startGraceTime: 300, 
+            collisionSlackPx: 1.5, // Visual correction pixel value (antialiasing buffer)
         };
 
         const STATE = {
@@ -417,8 +418,8 @@
             },
 
             updateBallPosition(cx, cy) {
-                this.els.playerGroup.style.left = `${cx - 16}px`;
-                this.els.playerGroup.style.top = `${cy - 16}px`;
+                this.els.playerGroup.style.left = `${cx - 13}px`; // Adjusted center offset for 26px ball
+                this.els.playerGroup.style.top = `${cy - 13}px`;
                 this.els.playerGroup.classList.remove('hidden-force');
                 STATE.currentBallPos = { x: cx, y: cy };
             },
@@ -953,10 +954,11 @@
             },
 
             checkCollision(x, y) {
+                // 1. Progress Calculation (Keep existing logic)
                 let minDist = Infinity;
                 let closestIdx = 0;
                 
-                // Optimized search can be done, but linear is fine for < 1000 points
+                // Linear search for closest point on path (for progress tracking)
                 for(let i=0; i<STATE.pathPoints.length; i++) {
                     const p = STATE.pathPoints[i];
                     const d = (x - p.x)**2 + (y - p.y)**2;
@@ -965,15 +967,45 @@
                         closestIdx = i;
                     }
                 }
-                
                 const dist = Math.sqrt(minDist);
                 
-                // Strict Collision Logic
-                // Safe Zone Half Width = (Path Width * Tolerance) / 2
-                const safeHalfWidth = (CONFIG.pathWidth * CONFIG.tolerance) / 2;
+                // 2. Collision Detection (New Logic: isPointInStroke + Sampling)
+                let collided = false;
+
+                // Prepare context for collision check
+                // We want to check if the ball is entirely within the "Safe Zone"
+                // The Safe Zone is drawn with lineWidth = pathWidth * tolerance
+                this.ctx.save();
+                this.ctx.lineWidth = CONFIG.pathWidth * CONFIG.tolerance;
+                this.ctx.lineCap = 'round';
+                this.ctx.lineJoin = 'round';
                 
-                // Collision if (Distance from center + Ball Radius) > Safe Zone Radius
-                const collided = (dist + CONFIG.ballRadius) > safeHalfWidth;
+                // Effective radius for visual correction
+                // Reduces the strictness slightly to match visual "touch" (antialiasing buffer)
+                const effectiveRadius = CONFIG.ballRadius - CONFIG.collisionSlackPx;
+                
+                // Check multiple points around the ball's perimeter
+                // If any point falls OUTSIDE the stroke, it's a collision
+                const samples = 16; 
+                const angleStep = (Math.PI * 2) / samples;
+
+                // Optimization: Check center first
+                if (!this.ctx.isPointInStroke(this.path2D, x, y)) {
+                    collided = true;
+                } else {
+                    for (let i = 0; i < samples; i++) {
+                        const angle = i * angleStep;
+                        const sx = x + Math.cos(angle) * effectiveRadius;
+                        const sy = y + Math.sin(angle) * effectiveRadius;
+                        
+                        if (!this.ctx.isPointInStroke(this.path2D, sx, sy)) {
+                            collided = true;
+                            break;
+                        }
+                    }
+                }
+
+                this.ctx.restore();
                 
                 return { collided, closestIdx, dist };
             },
